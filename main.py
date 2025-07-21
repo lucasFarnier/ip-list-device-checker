@@ -1,12 +1,14 @@
-import os
+import queue
 import subprocess
 import csv
+import threading
 import tkinter as tk
 from tkinter import ttk
 
 
 
 root = tk.Tk()
+root.attributes("-fullscreen", True)
 root.title("IP List Device Checker")
 outFrame = tk.Frame(root)
 outFrame.pack(fill="both", expand=True)
@@ -24,44 +26,20 @@ def onFrameConfig(event):
     canvas.configure(scrollregion=canvas.bbox("all"))
 frame.bind("<Configure>", onFrameConfig)
 
+
+
 treeviews = {}
+rows, chunks = [], []
+currentInd, completeChunks, i, j = 0, 0, 0, 0
+tree = None
+UIqueue = queue.Queue()
 
-
-
-rows = []
-currentInd, numberOfIPs, numberOn, i, j = 0, 0, 0, 0, 0
-tableTitle,tree = None, None
-
-
-
-def Reset():
-    global rows, currentInd, numberOfIPs, numberOn, i, j, tableTitle, tree
-
-    for widget in frame.winfo_children():
-        widget.destroy()
-
-    rows = []
-    currentInd, numberOfIPs, numberOn, i, j = 0, 0, 0, 0, 0
-    tableTitle, tree = None, None
-
-    openCSV()
-    root.after(0, checkIps)
-
-
-
-def openCSV():
-    global rows
-    with open("ips.csv") as csvfile:
-        reader = csv.reader(csvfile, delimiter=',')
-        next(reader, None)
-        rows = list(reader)
-    csvfile.close()
+runningChunks = {}
 
 
 
 def isAlive(ip):
     try:
-
         si = subprocess.STARTUPINFO()
         si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         si.wShowWindow = 6
@@ -77,73 +55,200 @@ def isAlive(ip):
     except:
         return False
 
+def Worker(chunkInd: int):
+    chunk = rows[chunkInd]
+    for DeviceName, Ip in chunk["rows"]:
+        UIqueue.put((chunkInd, DeviceName, Ip, isAlive(Ip)))
+    UIqueue.put((chunkInd, None, None, None))
+    print(f"Thread started for chunk {chunkInd}")
+
+    print(f"logs: {runningChunks}")
 
 
-def checkIps():
-    global currentInd, numberOfIPs, numberOn, i, j, tableTitle, tree
 
-    if currentInd >= len(rows):
-        if numberOfIPs != 0 and tableTitle:
-            makeTitle(tableTitle, i, j, numberOfIPs, numberOn)
-        root.after(5000, Reset)
+def RemoveStuckChunks():
+    now = datetime.now()
+    for chunkInd, timeS in list(runningChunks.items()):
+        if (now - timeS).total_seconds() > rows[chunkInd].get("timer"):
+            print(f"chunk {chunkInd} stuck since {timeS}, removing now")
+            runningChunks.pop(chunkInd)
+            multiCheckIps(chunkInd)
+
+
+def Reset():
+    global rows, currentInd, i, j, tree, completeChunks, totalChunks
+
+    print("Reset triggered")
+
+    RemoveStuckChunks()
+
+    for widget in frame.winfo_children():
+        widget.destroy()
+
+    global UIqueue
+    UIqueue = queue.Queue()
+    rows.clear()
+    currentInd, i, j = 0, 0, 0
+
+    rows[:] = openCSV()
+    totalChunks = len(rows)
+
+    for chunkInd in range(totalChunks):
+        if chunkInd == 5:
+            i += 2
+            j = 1
+        multiCheckIps(chunkInd)
+        j+=1
+
+
+
+def openCSV():
+    chunks = []
+    with open("ips.csv") as csvfile:
+        reader = csv.reader(csvfile, delimiter=',')
+        next(reader, None)
+
+        curChunk = None
+
+        for row in reader:
+            DeviceName = row[0]
+            Ip = row[1]
+
+            if Ip == "":
+                if curChunk:
+                    chunks.append(curChunk)
+                curChunk = {"title": DeviceName, "rows":[], "timer": int(row[2]) if row[2] else 60}
+
+            else:
+                curChunk["rows"].append([DeviceName, Ip])
+
+        chunks.append(curChunk)
+    return chunks
+
+
+
+def multiCheckIps(chunkInd=None):
+    global rows, currentInd, i, j, tree
+
+    if chunkInd is None:
+        chunkInd = currentInd
+
+    RemoveStuckChunks()
+
+    if runningChunks.get(chunkInd):
+        print(f"Chunk already running: {chunkInd}")
         return
-    row = rows[currentInd]
-    currentInd += 1
 
-    if row[1] == "":
-        if numberOfIPs > 0:
-            numberOfIPs, numberOn = makeTitle(tableTitle, i, j, numberOfIPs, numberOn)
-        tableTitle = row[0]
-        tree, i, j = makeTable(i, j)
-    else:
-        isIpAlive = isAlive(row[1])
-        numberOfIPs += 1
-        ID = tree.insert("", tk.END, values=(row[0], row[1]))
-        if not isIpAlive:
-            tree.item(ID, tags=("failed"))
-        else:
-            tree.item(ID, tags=("success"))
-            numberOn += 1
+    runningChunks[chunkInd] = datetime.now()
 
-        tree.tag_configure("failed", background="#E14B2A")
-        tree.tag_configure("success", background="#98fb98")
+    rows[chunkInd].setdefault("pos", (i, j))
 
-        tree.see(ID)
-        root.after(100)
+    title = TempTitle(rows[chunkInd]["title"], chunkInd, j)
+    tree = makeTable(i, j)
 
-    root.after(100, checkIps)
+    rows[chunkInd]["tree"] = tree
+    rows[chunkInd]["label"] = title
+
+    threading.Thread(target=Worker, args=(chunkInd,), daemon=True).start()
 
 
 
-def makeTitle(tableTitle, i, j, numberOfIPs, numberOn):
-    if numberOfIPs != 0 and "tableTitle" in locals():
-        label = tk.Label(frame, text=tableTitle + ":\n" + str(numberOn) + " / " + str(numberOfIPs), font=("Helvetica", 17, "bold"), bd=1.5, bg="lightblue", relief="solid", padx=5, pady=5)
-        label.grid(row=i, column=j, sticky="N", padx=10, pady=10)
-        return 0, 0
+def ProccessUIqueue():
+    global completeChunks, totalChunks
+    try:
+        while True:
+            chunkInd, DeviceName, Ip, isAlive = UIqueue.get_nowait()
+
+            if chunkInd < 0 or chunkInd >= len(rows):
+                continue
+
+            chunk = rows[chunkInd]
+
+            tree = chunk.get("tree")
+            label = chunk.get("label")
+
+            if tree is None:
+                continue
+
+            if DeviceName is None:
+                completeChunks +=1
+                success = sum(1 for iid in tree.get_children("") if "success" in tree.item(iid, "tags"))
+                makeTitle(label, chunk["title"], chunkInd, success)
+
+                print(f"complete chunk: {chunkInd}")
+
+                runningChunks.pop(chunkInd, None)
+
+                print(f"logs remaining: {runningChunks}")
+
+                root.after((chunk.get("timer")*1000), lambda chunkIndCopy = chunkInd: reCheckChunks(chunkIndCopy))
+                continue
+            iid = tree.insert("", tk.END, values=(DeviceName, Ip))
+            tree.item(iid, tags=("success" if isAlive else "failed",))
+    except queue.Empty:
+        pass
+    root.after(50, ProccessUIqueue)
 
 
+
+def reCheckChunks(chunkInd):
+    global i, j, currentInd, rows
+
+    newChunks = openCSV()
+
+    if chunkInd >= len(newChunks):
+        return
+
+    if len(newChunks) != totalChunks or any((newChunks[i]["title"] != rows[i]["title"] or newChunks[i]["timer"] != rows[i]["timer"]) for i in range(len(rows))):
+        print(f"miss mach amount: {totalChunks} doesnt equal number of chunks {len(newChunks)} \nor new differnet timer added/edited")
+        Reset()
+        return
+
+    updatedChunks = newChunks[chunkInd]
+
+    tree = rows[chunkInd].pop("tree", None)
+    if tree:
+        tree.destroy()
+    label = rows[chunkInd].pop("label", None)
+    if label:
+        label.destroy()
+
+    i, j = rows[chunkInd].get("pos", (0, 0))
+
+    rows[chunkInd]["title"] = updatedChunks["title"]
+    rows[chunkInd]["rows"] = updatedChunks["rows"]
+
+    multiCheckIps(chunkInd)
+
+
+
+def TempTitle(tableTitle, currentInd, j):
+    label = tk.Label(frame, text=tableTitle + ":\n ... / " + str(len(rows[currentInd]["rows"])), font=("Helvetica", 17, "bold"), bd=1.5, bg="lightblue", relief="solid", padx=5, pady=5)
+    label.grid(row=0, column=j, sticky="N", padx=10, pady=10)
+    return label
+
+def makeTitle(title, tableTitle, currentInd, numberSuccess):
+    title.config(text=tableTitle + ":\n" + str(numberSuccess) + " / " + str(len(rows[currentInd]["rows"])))
 
 def makeTable(i, j):
-    if (j == 5):
-        i += 2
-        j = 1
-    else:
-        j += 1
+    ttk.Style().configure("Treeview", rowheight=35, bd=1, font=('Helvetica', 20))
 
-    ttk.Style().configure("Treeview", rowheight=50)
+    tree = ttk.Treeview(frame, columns = ("DeviceName","IPAddress"), show="headings", style="Treeview", height=25)
 
-
-    tree = ttk.Treeview(frame, columns = ("DeviceName","IPAddress"), show="headings")
     tree.heading("DeviceName", text="Device Name", anchor="center")
     tree.heading("IPAddress", text="IP Address", anchor="center")
-    tree.column("DeviceName", minwidth=100, anchor="center")
-    tree.column("IPAddress", minwidth=100, anchor="center")
+
+    tree.column("DeviceName", width=175, anchor="center")
+    tree.column("IPAddress", width=225, anchor="center")
+
+    tree.tag_configure("failed", background="#E14B2A")
+    tree.tag_configure("success", background="#98fb98")
 
     tree.grid(row=i+1, column=j, sticky="w", padx=10, pady=10)
 
     return tree, i, j
 
 
-
 Reset()
+ProccessUIqueue()
 root.mainloop()

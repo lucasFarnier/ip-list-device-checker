@@ -2,9 +2,10 @@ import queue
 import subprocess
 import csv
 import threading
+import math
 import tkinter as tk
 from tkinter import ttk
-
+from datetime import datetime
 
 
 root = tk.Tk()
@@ -36,6 +37,7 @@ UIqueue = queue.Queue()
 
 runningChunks = {}
 
+scrollPos = 0.0
 
 
 def isAlive(ip):
@@ -75,6 +77,7 @@ def RemoveStuckChunks():
             multiCheckIps(chunkInd)
 
 
+
 def Reset():
     global rows, currentInd, i, j, tree, completeChunks, totalChunks
 
@@ -94,9 +97,9 @@ def Reset():
     totalChunks = len(rows)
 
     for chunkInd in range(totalChunks):
-        if chunkInd == 5:
+        if j == 4:
             i += 2
-            j = 1
+            j = 0
         multiCheckIps(chunkInd)
         j+=1
 
@@ -110,16 +113,27 @@ def openCSV():
 
         curChunk = None
 
+        titleName = ""
+        totalSplits = 1
+        timer = 0
+
         for row in reader:
             DeviceName = row[0]
             Ip = row[1]
 
             if Ip == "":
+                titleName = row[0]
+                totalSplits = 1
+                timer = int(row[2])
                 if curChunk:
                     chunks.append(curChunk)
-                curChunk = {"title": DeviceName, "rows":[], "timer": int(row[2]) if row[2] else 60}
+                curChunk = {"title": titleName, "rows":[], "timer": timer if timer else 60}
 
             else:
+                if len(curChunk["rows"]) == 25:
+                    totalSplits += 1
+                    chunks.append(curChunk)
+                    curChunk = {"title": f"{titleName} - {totalSplits}", "rows": [], "timer": timer if timer else 60}
                 curChunk["rows"].append([DeviceName, Ip])
 
         chunks.append(curChunk)
@@ -143,7 +157,7 @@ def multiCheckIps(chunkInd=None):
 
     rows[chunkInd].setdefault("pos", (i, j))
 
-    title = TempTitle(rows[chunkInd]["title"], chunkInd, j)
+    title = TempTitle(rows[chunkInd]["title"], chunkInd, i, j)
     tree = makeTable(i, j)
 
     rows[chunkInd]["tree"] = tree
@@ -222,9 +236,9 @@ def reCheckChunks(chunkInd):
 
 
 
-def TempTitle(tableTitle, currentInd, j):
+def TempTitle(tableTitle, currentInd, i, j):
     label = tk.Label(frame, text=tableTitle + ":\n ... / " + str(len(rows[currentInd]["rows"])), font=("Helvetica", 17, "bold"), bd=1.5, bg="lightblue", relief="solid", padx=5, pady=5)
-    label.grid(row=0, column=j, sticky="N", padx=10, pady=10)
+    label.grid(row=i, column=j, sticky="N", padx=10, pady=10)
     return label
 
 def makeTitle(title, tableTitle, currentInd, numberSuccess):
@@ -246,9 +260,21 @@ def makeTable(i, j):
 
     tree.grid(row=i+1, column=j, sticky="w", padx=10, pady=10)
 
-    return tree, i, j
+    return tree
 
+def autoScroll(step=1):
+    global totalChunks, scrollPos
+    rowPercent = 1.0/(math.ceil(totalChunks / 4))
+
+    scrollPos += rowPercent
+    if scrollPos >= 1.0:
+        scrollPos = 0.0
+
+    canvas.yview_moveto(scrollPos)
+
+    root.after(5000 ,autoScroll)
 
 Reset()
 ProccessUIqueue()
+autoScroll()
 root.mainloop()

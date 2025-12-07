@@ -1,2 +1,3 @@
 DeviceName,Ip,Timer
-example,10.60.156.0,30
+exampletable
+exampleIp,10.60.156.0,30

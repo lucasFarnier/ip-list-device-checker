@@ -36,3 +36,6 @@ exampletable2,,
 
 exampleIp2.1,10.60.156.0,30
 ```
+
+this script will also potentially be pairable with the subnet finder, allowing the csv to dynamicly edit on a timer, eg for dynamic ips that could change is able to get the new ip of the device and keep checking it
+[subnet lister](https://github.com/lucasFarnier/subnet-device-lister)

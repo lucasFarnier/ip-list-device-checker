@@ -13,15 +13,24 @@ examples below:
 rows below are all ip names, ips and timers (timers if empty is 60 seconds)
 
 DeviceName,Ip,Timer
+
 exampletable,,
+
 exampleIp,10.60.156.0,30
+
 
 -for multiple tables
 
 DeviceName,Ip,Timer
+
 exampletable,,
+
 exampleIp1,10.60.156.0,30
+
 exampleIp2,10.60.156.0,30
+
 exampleIp3,10.60.156.0,30
+
 exampletable2,,
+
 exampleIp2.1,10.60.156.0,30

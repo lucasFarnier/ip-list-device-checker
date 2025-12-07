@@ -6,21 +6,22 @@ each table is also ran in multi thread allow all the tables to run simultaniusly
 
 each table can also get a specified time to refresh if non specified defaults to 60 seconds
 
+
 examples below:
 
 -basic table top row is col names
 2nd row is the table name, done by specifying only device name and leavin ip and timer blank
 rows below are all ip names, ips and timers (timers if empty is 60 seconds)
-
+```
 DeviceName,Ip,Timer
 
 exampletable,,
 
 exampleIp,10.60.156.0,30
-
+```
 
 -for multiple tables
-
+```
 DeviceName,Ip,Timer
 
 exampletable,,
@@ -34,3 +35,4 @@ exampleIp3,10.60.156.0,30
 exampletable2,,
 
 exampleIp2.1,10.60.156.0,30
+```
